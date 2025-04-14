@@ -8,3 +8,10 @@ INSERT INTO urls(
     $1,$2,$3,$4
 ) 
 RETURNING *;
+
+-- name: IsShortCodeAvailable :one
+SELECT NOT EXISTS (
+    SELECT 1
+    FROM urls
+    WHERE short_code = $1
+) AS is_available;
