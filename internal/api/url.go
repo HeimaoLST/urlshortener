@@ -1,40 +1,33 @@
 package api
 
 import (
-	"context"
 	"github/heimaolst/urlshorter/internal/model"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/gin-gonic/gin"
 )
 
-type URLHandler struct {
-	urlService URLService
-}
-type URLService interface {
-	CreateURL(ctx context.Context, req model.CreateURLRequest) (*model.CreateURLResponse, error)
-}
-
 // POST 短链接生成
-func (h *URLHandler) CreateURL(c echo.Context) error {
+func (server *Server) CreateURL(ctx *gin.Context) {
 
 	var req model.CreateURLRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, errResponse(err))
+		return
 	}
+	// 生成短链接
 
-	if err := c.Validate(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	// shortcode, err := server.store.CreateURL(ctx, arg)
+	// if err != nil {
+	// 	ctx.JSON(http.StatusInternalServerError, errResponse(err))
+	// 	return
+	// }
 
-	resp, err := h.urlService.CreateURL(c.Request().Context(), req)
-
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-
-	return c.JSON(http.StatusCreated, resp)
+	// res := model.CreateURLResponse{
+	// 	ShortURL: shortcode,
+	// 	ExpireAt: shortcode.ExpireAt,
+	// }
+	// ctx.JSON(http.StatusOK, res)
 
 }
-
-//GET 重定向到长链接
