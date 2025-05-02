@@ -11,6 +11,6 @@ migratedown:
 sqlc:
 	docker run --rm -v "${CURDIR}:/src" -w /src sqlc/sqlc generate
 server:
-	go run main.go
+	go build main.go && .\main.exe
 	
 .PHONY: createdb dropdb migrateup migratedown sqlc server
