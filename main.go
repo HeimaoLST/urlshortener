@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	redisclient "github/heimaolst/urlshorter/db/redis"
 	db "github/heimaolst/urlshorter/db/sqlc"
-
 	"github/heimaolst/urlshorter/internal/api"
 	"github/heimaolst/urlshorter/internal/util"
 	"log"
@@ -32,18 +32,11 @@ func main() {
 		panic(err)
 	}
 
-	rdb := redis.NewClient(opt)
-
-	pong, err := rdb.Ping(ctx).Result()
-
-	if err != nil {
-		log.Fatal("cannot connect to redis: ", err)
-	}
-	log.Println("已连接Redis", pong)
-
 	store := db.NewStore(conn)
 
-	server := api.NewServer(store)
+	rdb := redisclient.NewRedisClient(opt)
+
+	server := api.NewServer(store, rdb)
 
 	server.Start(config.ServerAddress)
 }
