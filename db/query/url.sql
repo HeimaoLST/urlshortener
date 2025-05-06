@@ -15,3 +15,8 @@ SELECT NOT EXISTS (
     FROM urls
     WHERE short_code = $1
 ) AS is_available;
+
+-- name: UrlExpiredAt :one
+SELECT expired_at
+FROM urls
+WHERE short_code = $1;

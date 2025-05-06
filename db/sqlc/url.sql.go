@@ -62,3 +62,16 @@ func (q *Queries) IsShortCodeAvailable(ctx context.Context, shortCode string) (b
 	err := row.Scan(&is_available)
 	return is_available, err
 }
+
+const urlExpiredAt = `-- name: UrlExpiredAt :one
+SELECT expired_at
+FROM urls
+WHERE short_code = $1
+`
+
+func (q *Queries) UrlExpiredAt(ctx context.Context, shortCode string) (time.Time, error) {
+	row := q.db.QueryRowContext(ctx, urlExpiredAt, shortCode)
+	var expired_at time.Time
+	err := row.Scan(&expired_at)
+	return expired_at, err
+}
