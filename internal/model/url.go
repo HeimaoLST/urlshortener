@@ -9,6 +9,12 @@ type CreateURLRequest struct {
 }
 
 type CreateURLResponse struct {
-	ShortURL string    `json:"short_url"`
-	ExpireAt time.Time `json:"expire_at"`
+	ShortCode string    `json:"short_code"`
+	ExpireAt  time.Time `json:"expire_at"`
+}
+type URL struct {
+	ShortCode   string    `json:"short_code"`
+	OriginalURL string    `json:"original_url"`
+	ExpiredAt   time.Time `json:"expired_at"`
+	IsCustom    bool      `json:"is_custom"`
 }
