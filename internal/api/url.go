@@ -41,7 +41,7 @@ func (server *Server) CreateURL(ctx *gin.Context) {
 	}
 
 	// 固定过期时间，可以考虑从请求或配置中获取
-	expireDuration := time.Hour * 24 * 7
+	expireDuration := time.Hour * time.Duration(*req.Duration)
 	finalExpireAt := time.Now().Add(expireDuration)
 
 	if req.CustomCode != "" {
