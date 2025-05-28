@@ -21,6 +21,7 @@ func NewServer(store *db.Store, rdb *redis.Client) *Server {
 	router := gin.Default()
 
 	router.POST("/api/create", server.CreateURL)
+	router.GET("/api/jump", server.RedirectURL)
 	server.router = router
 
 	return server

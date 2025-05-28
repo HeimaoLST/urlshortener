@@ -48,6 +48,26 @@ func (q *Queries) CreateUrl(ctx context.Context, arg CreateUrlParams) (Url, erro
 	return i, err
 }
 
+const getUrlByShortCode = `-- name: GetUrlByShortCode :one
+SELECT id, original_url, short_code, is_custom, expired_at, created_at
+FROM urls
+WHERE short_code = $1
+`
+
+func (q *Queries) GetUrlByShortCode(ctx context.Context, shortCode string) (Url, error) {
+	row := q.db.QueryRowContext(ctx, getUrlByShortCode, shortCode)
+	var i Url
+	err := row.Scan(
+		&i.ID,
+		&i.OriginalUrl,
+		&i.ShortCode,
+		&i.IsCustom,
+		&i.ExpiredAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const isShortCodeAvailable = `-- name: IsShortCodeAvailable :one
 SELECT NOT EXISTS (
     SELECT 1

@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand" // 考虑使用 crypto/rand 获取更强的随机性
+	"database/sql"
 	"errors"
 	"fmt"
 	db "github/heimaolst/urlshorter/db/sqlc"
@@ -151,6 +152,54 @@ func (server *Server) CreateURL(ctx *gin.Context) {
 		return
 	}
 }
+func (server *Server) RedirectURL(ctx *gin.Context) {
+	shortcode := ctx.Query("shortcode")
+	if shortcode == "" {
+		ctx.JSON(http.StatusBadRequest, errResponse(errors.New("缺少 shortcode 参数")))
+		return
+	}
+	// 先检查 Redis 缓存
+	redisKey := shortcode_prefix + shortcode
+	originalURL, err := server.rdb.Get(ctx, redisKey).Result()
+	if err == redis.Nil {
+		// 缓存未命中，查询数据库
+		url, dbErr := server.store.GetUrlByShortCode(ctx, shortcode)
+		if dbErr != nil {
+			if dbErr == sql.ErrNoRows {
+				ctx.JSON(http.StatusNotFound, errResponse(errors.New("短链接不存在")))
+			} else {
+				log.Printf("ERROR: DB GetUrlByShortCode for '%s' failed: %v\n", shortcode, dbErr)
+				ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("服务内部错误，请稍后重试")))
+			}
+			return
+		}
+
+		// 检查是否过期
+		if time.Now().After(url.ExpiredAt) {
+			ctx.JSON(http.StatusGone, errResponse(errors.New("短链接已过期")))
+			return
+		}
+
+		// 将结果存入 Redis 缓存
+		err = server.rdb.Set(ctx, redisKey, url.OriginalUrl, time.Until(url.ExpiredAt)).Err()
+		if err != nil {
+			log.Printf("WARN: Redis Set for '%s' after DB fetch failed: %v\n", shortcode, err)
+			// 通常不因为缓存失败而给用户报错，数据库已成功
+		}
+
+		ctx.Redirect(http.StatusFound, url.OriginalUrl)
+		return
+	} else if err != nil {
+		log.Printf("ERROR: Redis Get for '%s' failed: %v\n", shortcode, err)
+		ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("服务内部错误，请稍后重试")))
+		return
+
+	} else {
+		ctx.Redirect(http.StatusFound, originalURL)
+		return
+	}
+
+}
 
 // generateRandomString 生成指定长度的随机字符串
 // 建议: 将此函数或其使用的 rand.Rand 实例作为 Server 的一部分，以便更好地管理随机数生成器的状态和播种。
@@ -189,16 +238,14 @@ func (server *Server) getUniqueShortCode(ctx *gin.Context) (string, error) {
 		}
 
 		if isAvailable {
-			// 同时检查一下 Redis，虽然理论上新生成的应该不会在 Redis 里，除非有哈希碰撞且正好被用作自定义码
-			// 这一步可以根据实际情况决定是否需要，主要是防止极小概率的碰撞
-			// _, redisErr := server.rdb.Get(ctx, shortcode_prefix+shortCode).Result()
-			// if redisErr == redis.Nil {
-			// 	return shortCode, nil
-			// } else if redisErr != nil {
-			//   log.Printf("WARN: Redis check during getUniqueShortCode for '%s' failed: %v\n", shortCode, redisErr)
-			//   // 可以选择忽略 Redis 错误继续，或返回错误
-			// }
-			return shortCode, nil // 如果不检查 Redis，则直接返回
+
+			_, redisErr := server.rdb.Get(ctx, shortcode_prefix+shortCode).Result()
+			if redisErr == redis.Nil {
+				return shortCode, nil
+			} else if redisErr != nil {
+				log.Printf("WARN: Redis check during getUniqueShortCode for '%s' failed: %v\n", shortCode, redisErr)
+			}
+
 		}
 	}
 	return "", errors.New("无法在限定次数内生成唯一的短链接")

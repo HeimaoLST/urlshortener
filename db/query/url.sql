@@ -20,3 +20,9 @@ SELECT NOT EXISTS (
 SELECT expired_at
 FROM urls
 WHERE short_code = $1;
+
+-- name: GetUrlByShortCode :one
+SELECT *
+FROM urls
+WHERE short_code = $1;
+
