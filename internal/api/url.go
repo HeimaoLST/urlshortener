@@ -7,6 +7,7 @@ import (
 	"fmt"
 	db "github/heimaolst/urlshorter/db/sqlc"
 	"github/heimaolst/urlshorter/internal/model"
+
 	"log"
 	"math/big" // 如果使用 crypto/rand
 	"net/http"
@@ -34,15 +35,23 @@ const maxGenerateRetries = 5
 
 // POST 短链接生成
 func (server *Server) CreateURL(ctx *gin.Context) {
+
 	var req model.CreateURLRequest
+	var expireDuration time.Duration
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, errResponse(err))
 		return
 	}
+	log.Println(">>>>>>request:", req)
 
 	// 固定过期时间，可以考虑从请求或配置中获取
-	expireDuration := time.Hour * time.Duration(*req.Duration)
+	if req.Duration != nil {
+		// 只有当 req.Duration 不是 nil 时才解引用
+		expireDuration = time.Hour * time.Duration(*req.Duration)
+	} else {
+		expireDuration = time.Hour * 1
+	}
 	finalExpireAt := time.Now().Add(expireDuration)
 
 	if req.CustomCode != "" {
@@ -70,17 +79,7 @@ func (server *Server) CreateURL(ctx *gin.Context) {
 		}
 
 		if !isAvailable {
-			// （可选）如果数据库中存在但缓存没有，可以考虑将数据库信息写入缓存
-			// fetchedURL, fetchErr := server.store.GetUrlByShortCode(ctx, req.CustomCode) // 假设有这样一个方法
-			// if fetchErr == nil {
-			// 	ttl := time.Until(fetchedURL.ExpiredAt)
-			// 	if ttl > 0 {
-			// 		 e := server.rdb.Set(ctx, redisKey, fetchedURL.OriginalUrl, ttl).Err()
-			//     if e != nil {
-			//        log.Printf("WARN: Failed to update cache for existing custom code '%s': %v\n", req.CustomCode, e)
-			//     }
-			// 	}
-			// }
+
 			ctx.JSON(http.StatusConflict, errResponse(errors.New("自定义短链接已被使用 (数据库)")))
 			return
 		}
@@ -109,6 +108,7 @@ func (server *Server) CreateURL(ctx *gin.Context) {
 		}
 
 		ctx.JSON(http.StatusOK, model.CreateURLResponse{
+			Success:   true,
 			ShortCode: createdUrl.ShortCode, // 确保响应中包含 OriginalURL
 			ExpireAt:  createdUrl.ExpiredAt,
 		})
@@ -146,6 +146,7 @@ func (server *Server) CreateURL(ctx *gin.Context) {
 		}
 
 		ctx.JSON(http.StatusOK, model.CreateURLResponse{
+			Success:   true,
 			ShortCode: createdUrl.ShortCode, // 确保响应中包含 OriginalURL
 			ExpireAt:  createdUrl.ExpiredAt,
 		})

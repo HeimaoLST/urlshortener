@@ -9,6 +9,7 @@ type CreateURLRequest struct {
 }
 
 type CreateURLResponse struct {
+	Success   bool      `json:"success"`
 	ShortCode string    `json:"short_code"`
 	ExpireAt  time.Time `json:"expire_at"`
 }
