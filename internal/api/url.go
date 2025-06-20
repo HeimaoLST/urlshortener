@@ -7,7 +7,7 @@ import (
 	"fmt"
 	db "github/heimaolst/urlshorter/db/sqlc"
 	"github/heimaolst/urlshorter/internal/model"
-
+	"github/heimaolst/urlshorter/internal/util"
 	"log"
 	"math/big" // 如果使用 crypto/rand
 	"net/http"
@@ -43,9 +43,7 @@ func (server *Server) CreateURL(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, errResponse(err))
 		return
 	}
-	log.Println(">>>>>>request:", req)
 
-	// 固定过期时间，可以考虑从请求或配置中获取
 	if req.Duration != nil {
 		// 只有当 req.Duration 不是 nil 时才解引用
 		expireDuration = time.Hour * time.Duration(*req.Duration)
@@ -66,8 +64,7 @@ func (server *Server) CreateURL(ctx *gin.Context) {
 		}
 		if err != redis.Nil { // Redis 查询出错
 			log.Printf("ERROR: Redis Get for custom code '%s' failed: %v\n", req.CustomCode, err)
-			ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("服务内部错误，请稍后重试")))
-			return
+
 		}
 
 		// 缓存未命中 (err == redis.Nil)，检查数据库
@@ -164,33 +161,33 @@ func (server *Server) RedirectURL(ctx *gin.Context) {
 	originalURL, err := server.rdb.Get(ctx, redisKey).Result()
 	if err == redis.Nil {
 		// 缓存未命中，查询数据库
-		url, dbErr := server.store.GetUrlByShortCode(ctx, shortcode)
-		if dbErr != nil {
-			if dbErr == sql.ErrNoRows {
-				ctx.JSON(http.StatusNotFound, errResponse(errors.New("短链接不存在")))
-			} else {
-				log.Printf("ERROR: DB GetUrlByShortCode for '%s' failed: %v\n", shortcode, dbErr)
-				ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("服务内部错误，请稍后重试")))
+		url, dbErr := server.getUrlByDB(ctx, shortcode)
+		if dbErr == nil {
+			// 检查是否过期
+			if time.Now().After(url.ExpiredAt) {
+				ctx.JSON(http.StatusGone, errResponse(errors.New("短链接已过期")))
+				return
 			}
+
+			err = server.rdb.Set(ctx, redisKey, url.OriginalUrl, time.Until(url.ExpiredAt)).Err()
+			if err != nil {
+				log.Printf("WARN: Redis Set for '%s' after DB fetch failed: %v\n", shortcode, err)
+
+			}
+
+			ctx.Redirect(http.StatusFound, url.OriginalUrl)
+			return
+
+		} else if dbErr == util.ErrNotFoundInDB {
+			ctx.JSON(http.StatusNotFound, dbErr.Error())
+			return
+		} else {
+			ctx.JSON(http.StatusInternalServerError, dbErr.Error())
 			return
 		}
 
-		// 检查是否过期
-		if time.Now().After(url.ExpiredAt) {
-			ctx.JSON(http.StatusGone, errResponse(errors.New("短链接已过期")))
-			return
-		}
-
-		// 将结果存入 Redis 缓存
-		err = server.rdb.Set(ctx, redisKey, url.OriginalUrl, time.Until(url.ExpiredAt)).Err()
-		if err != nil {
-			log.Printf("WARN: Redis Set for '%s' after DB fetch failed: %v\n", shortcode, err)
-			// 通常不因为缓存失败而给用户报错，数据库已成功
-		}
-
-		ctx.Redirect(http.StatusFound, url.OriginalUrl)
-		return
 	} else if err != nil {
+		//Redis异常，退化为数据库查询
 		log.Printf("ERROR: Redis Get for '%s' failed: %v\n", shortcode, err)
 		ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("服务内部错误，请稍后重试")))
 		return
@@ -250,6 +247,18 @@ func (server *Server) getUniqueShortCode(ctx *gin.Context) (string, error) {
 		}
 	}
 	return "", errors.New("无法在限定次数内生成唯一的短链接")
+}
+func (server *Server) getUrlByDB(ctx *gin.Context, shortcode string) (db.Url, error) {
+	url, dbErr := server.store.GetUrlByShortCode(ctx, shortcode)
+	if dbErr != nil {
+		if dbErr == sql.ErrNoRows {
+			return db.Url{}, util.ErrNotFoundInDB
+		} else {
+			return db.Url{}, util.ErrDatabase
+		}
+
+	}
+	return url, dbErr
 }
 
 // errResponse 是你自定义的错误响应函数，这里只是一个占位符
