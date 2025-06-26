@@ -26,3 +26,7 @@ SELECT *
 FROM urls
 WHERE short_code = $1;
 
+-- name: AddUrlClick :exec
+UPDATE urls
+SET clicks = clicks + sqlc.arg(add_count)
+WHERE id = sqlc.arg(id);

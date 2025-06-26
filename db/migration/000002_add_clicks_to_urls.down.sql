@@ -1,0 +1,5 @@
+BEGIN;
+
+ALTER TABLE urls DROP COLUMN clicks;
+
+COMMIT;

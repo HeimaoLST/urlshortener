@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"crypto/rand" // 考虑使用 crypto/rand 获取更强的随机性
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	db "github/heimaolst/urlshorter/db/sqlc"
@@ -35,120 +37,98 @@ const maxGenerateRetries = 5
 
 // POST 短链接生成
 func (server *Server) CreateURL(ctx *gin.Context) {
-
 	var req model.CreateURLRequest
-	var expireDuration time.Duration
-
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, errResponse(err))
 		return
 	}
 
+	// 计算最终的过期时间
+	var expireDuration time.Duration
 	if req.Duration != nil {
-		// 只有当 req.Duration 不是 nil 时才解引用
 		expireDuration = time.Hour * time.Duration(*req.Duration)
 	} else {
-		expireDuration = time.Hour * 1
+		expireDuration = time.Hour * 1 // 默认1小时
 	}
 	finalExpireAt := time.Now().Add(expireDuration)
 
+	var shortCode string
+	var isCustom bool
+
 	if req.CustomCode != "" {
-		// --- 处理自定义短链接 ---
-		redisKey := shortcode_prefix + req.CustomCode
+		// --- 分支一: 处理自定义短链接 ---
+		isCustom = true
+		shortCode = req.CustomCode
 
-		// 1. 检查缓存
-		_, err := server.rdb.Get(ctx, redisKey).Result()
-		if err == nil { // 缓存命中
-			ctx.JSON(http.StatusConflict, errResponse(errors.New("自定义短链接已被使用 (缓存)")))
+		// 1. 检查自定义短链接是否已被使用 (统一检查缓存和数据库)
+		// 首先检查缓存
+		cachedUrl, err := server.getUrlFromCache(ctx, shortCode)
+		if err != nil && err != redis.Nil {
+			log.Printf("ERROR: Redis check for custom code '%s' failed: %v\n", shortCode, err)
+
+		}
+		if cachedUrl != nil {
+			ctx.JSON(http.StatusConflict, errResponse(errors.New("自定义短链接已被使用 (来自缓存)")))
 			return
 		}
-		if err != redis.Nil { // Redis 查询出错
-			log.Printf("ERROR: Redis Get for custom code '%s' failed: %v\n", req.CustomCode, err)
 
-		}
-
-		// 缓存未命中 (err == redis.Nil)，检查数据库
-		isAvailable, dbErr := server.store.IsShortCodeAvailable(ctx, req.CustomCode) // 假设此方法返回 true 如果可用，false 如果已存在
+		// 缓存未命中，检查数据库
+		isAvailable, dbErr := server.store.IsShortCodeAvailable(ctx, shortCode)
 		if dbErr != nil {
-			log.Printf("ERROR: DB IsShortCodeAvailable for custom code '%s' failed: %v\n", req.CustomCode, dbErr)
-			ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("服务内部错误，请稍后重试")))
+			log.Printf("ERROR: DB IsShortCodeAvailable for custom code '%s' failed: %v\n", shortCode, dbErr)
+			ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("服务内部错误")))
 			return
 		}
-
 		if !isAvailable {
-
-			ctx.JSON(http.StatusConflict, errResponse(errors.New("自定义短链接已被使用 (数据库)")))
+			ctx.JSON(http.StatusConflict, errResponse(errors.New("自定义短链接已被使用 (来自数据库)")))
 			return
 		}
-
-		// 自定义短链接可用，创建
-		urlParams := db.CreateUrlParams{
-			ShortCode:   req.CustomCode,
-			IsCustom:    true,
-			OriginalUrl: req.OriginalURL,
-			ExpiredAt:   finalExpireAt,
-		}
-		createdUrl, err := server.store.CreateUrl(ctx, urlParams) // 假设 CreateUrl 返回创建的对象
-		if err != nil {
-			log.Printf("ERROR: DB CreateUrl for custom code '%s' failed: %v\n", req.CustomCode, err)
-			ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("创建短链接失败")))
-			return
-		}
-
-		ttl := time.Until(createdUrl.ExpiredAt)
-		if ttl > 0 {
-			err = server.rdb.Set(ctx, redisKey, createdUrl.OriginalUrl, ttl).Err()
-			if err != nil {
-				log.Printf("WARN: Redis Set for custom code '%s' failed after DB insert: %v\n", req.CustomCode, err)
-				// 通常不因为缓存失败而给用户报错，数据库已成功
-			}
-		}
-
-		ctx.JSON(http.StatusOK, model.CreateURLResponse{
-			Success:   true,
-			ShortCode: createdUrl.ShortCode, // 确保响应中包含 OriginalURL
-			ExpireAt:  createdUrl.ExpiredAt,
-		})
-		return
 
 	} else {
-		// --- 处理自动生成短链接 ---
-		shortCode, err := server.getUniqueShortCode(ctx)
+		// --- 分支二: 处理自动生成短链接 ---
+		isCustom = false
+		generatedCode, err := server.getUniqueShortCode(ctx)
 		if err != nil {
 			log.Printf("ERROR: Failed to generate unique short code: %v\n", err)
 			ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("生成短链接失败")))
 			return
 		}
+		shortCode = generatedCode
+	}
 
-		urlParams := db.CreateUrlParams{
-			ShortCode:   shortCode,
-			IsCustom:    false,
-			OriginalUrl: req.OriginalURL,
-			ExpiredAt:   finalExpireAt,
-		}
-		createdUrl, err := server.store.CreateUrl(ctx, urlParams)
-		if err != nil {
-			log.Printf("ERROR: DB CreateUrl for generated code '%s' failed: %v\n", shortCode, err)
-			ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("创建短链接失败")))
-			return
-		}
+	// --- 统一的创建逻辑 ---
+	// 此时 shortCode 无论是自定义的还是自动生成的，都已确保唯一
+	urlParams := db.CreateUrlParams{
+		ShortCode:   shortCode,
+		IsCustom:    isCustom,
+		OriginalUrl: req.OriginalURL,
+		ExpiredAt:   finalExpireAt,
+	}
 
-		redisKey := shortcode_prefix + shortCode
-		ttl := time.Until(createdUrl.ExpiredAt)
-		if ttl > 0 {
-			err = server.rdb.Set(ctx, redisKey, createdUrl.OriginalUrl, ttl).Err()
-			if err != nil {
-				log.Printf("WARN: Redis Set for generated code '%s' failed after DB insert: %v\n", shortCode, err)
-			}
-		}
-
-		ctx.JSON(http.StatusOK, model.CreateURLResponse{
-			Success:   true,
-			ShortCode: createdUrl.ShortCode, // 确保响应中包含 OriginalURL
-			ExpireAt:  createdUrl.ExpiredAt,
-		})
+	createdUrl, err := server.store.CreateUrl(ctx, urlParams)
+	if err != nil {
+		log.Printf("ERROR: DB CreateUrl for code '%s' failed: %v\n", shortCode, err)
+		ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("创建短链接失败")))
 		return
 	}
+
+	// **【核心修改】**
+	// 将新创建的链接信息写入缓存，统一调用 setUrlInCache 函数
+	// 这个函数内部会使用 HSET
+	go func() {
+		// 使用后台协程，避免阻塞主请求
+		err := server.setUrlInCache(ctx, &createdUrl)
+		if err != nil {
+			log.Printf("WARN: Failed to set cache for code '%s' after DB insert: %v\n", createdUrl.ShortCode, err)
+		}
+	}()
+
+	// 成功响应
+	ctx.JSON(http.StatusOK, model.CreateURLResponse{
+		Success:   true,
+		ShortCode: createdUrl.ShortCode,
+		ExpireAt:  createdUrl.ExpiredAt,
+	})
 }
 func (server *Server) RedirectURL(ctx *gin.Context) {
 	shortcode := ctx.Query("shortcode")
@@ -157,46 +137,142 @@ func (server *Server) RedirectURL(ctx *gin.Context) {
 		return
 	}
 	// 先检查 Redis 缓存
-	redisKey := shortcode_prefix + shortcode
-	originalURL, err := server.rdb.Get(ctx, redisKey).Result()
-	if err == redis.Nil {
-		// 缓存未命中，查询数据库
-		url, dbErr := server.getUrlByDB(ctx, shortcode)
-		if dbErr == nil {
-			// 检查是否过期
-			if time.Now().After(url.ExpiredAt) {
-				ctx.JSON(http.StatusGone, errResponse(errors.New("短链接已过期")))
-				return
-			}
 
-			err = server.rdb.Set(ctx, redisKey, url.OriginalUrl, time.Until(url.ExpiredAt)).Err()
-			if err != nil {
-				log.Printf("WARN: Redis Set for '%s' after DB fetch failed: %v\n", shortcode, err)
+	cachedUrl, err := server.getUrlFromCache(ctx, shortcode)
+	// originalURL, err := server.rdb.Get(ctx, redisKey).Result()
+	if err == nil { // 缓存命中！
+		// 直接使用缓存数据进行重定向
+		go server.recordClick(cachedUrl.ID) // 异步记录点击
+		ctx.Redirect(http.StatusFound, cachedUrl.OriginalUrl)
+		return
+	}
+	if err != redis.Nil { // 遇到了真正的 Redis 错误
+		// 记录错误日志，并可以考虑重定向到一个错误页面
+		log.Printf("Redis error: %v", err)
+	}
 
-			}
-
-			ctx.Redirect(http.StatusFound, url.OriginalUrl)
-			return
-
-		} else if dbErr == util.ErrNotFoundInDB {
-			ctx.JSON(http.StatusNotFound, dbErr.Error())
-			return
-		} else {
-			ctx.JSON(http.StatusInternalServerError, dbErr.Error())
+	url, dbErr := server.getUrlByDB(ctx, shortcode)
+	if dbErr == nil {
+		// 检查是否过期
+		if time.Now().After(url.ExpiredAt) {
+			ctx.JSON(http.StatusGone, errResponse(errors.New("短链接已过期")))
 			return
 		}
-
-	} else if err != nil {
-		//Redis异常，退化为数据库查询
-		log.Printf("ERROR: Redis Get for '%s' failed: %v\n", shortcode, err)
-		ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("服务内部错误，请稍后重试")))
+		go server.recordClick(url.ID)
+		ctx.Redirect(http.StatusFound, url.OriginalUrl)
+		go server.setUrlInCache(ctx, &url)
 		return
 
+	} else if dbErr == util.ErrNotFoundInDB {
+		ctx.JSON(http.StatusNotFound, dbErr.Error())
+		return
 	} else {
-		ctx.Redirect(http.StatusFound, originalURL)
+		ctx.JSON(http.StatusInternalServerError, dbErr.Error())
 		return
 	}
 
+}
+func (server *Server) recordClick(urlID int64) {
+	select {
+	case server.clickChan <- urlID:
+	default:
+		log.Println("WARN: Click channel is full. Discarding click event.")
+	}
+}
+func (server *Server) clickProcessor() {
+	// 使用 map 在内存中聚合点击次数
+	// key: url_id, value: click_count
+	clicks := make(map[int64]int)
+	// 创建一个定时器，例如每5秒触发一次，将聚合数据刷入数据库
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("INFO: Starting background click processor...")
+
+	for {
+		select {
+		case urlID := <-server.clickChan:
+			// 每接收到一个点击，就在 map 中累加
+			clicks[urlID]++
+		case <-ticker.C:
+			// 定时器触发
+			if len(clicks) == 0 {
+				continue
+			}
+
+			// 为了不阻塞后续的 channel 接收，
+			// 将当前聚合的 map 复制出来，并重置原来的 map
+			clicksToFlush := clicks
+			clicks = make(map[int64]int)
+
+			// 在一个新的 goroutine 中执行数据库写入操作，
+			// 以免长时间的DB操作阻塞 clickProcessor
+			go server.flushClicksToDB(clicksToFlush)
+		}
+	}
+}
+func (server *Server) flushClicksToDB(clicksToFlush map[int64]int) {
+	err := server.store.AddUrlClicks(context.Background(), clicksToFlush)
+
+	if err != nil {
+		log.Printf("ERROR: Failed to flush clicks to DB: %v", err)
+
+	}
+
+}
+
+func (s *Server) setUrlInCache(ctx *gin.Context, urlData *db.Url) error {
+	// 检查传入的数据是否有效
+	if urlData == nil || urlData.ShortCode == "" {
+		return fmt.Errorf("invalid url data provided")
+	}
+
+	// 将整个 Url 结构体序列化为 JSON 字符串
+	payloadBytes, err := json.Marshal(urlData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal url data: %w", err)
+	}
+
+	err = s.rdb.HSet(ctx, shortcode_prefix, urlData.ShortCode, payloadBytes).Err()
+	if err != nil {
+		return fmt.Errorf("failed to execute HSet on redis: %w", err)
+	}
+
+	return nil
+}
+
+// getUrlFromCache 从 Redis Hash 中读取并返回一个有效的 Url 对象
+func (s *Server) getUrlFromCache(ctx *gin.Context, shortCode string) (*db.Url, error) {
+	// 使用 HGet 从 Redis 读取 JSON 字符串
+	payloadBytes, err := s.rdb.HGet(ctx, shortcode_prefix, shortCode).Bytes()
+	if err == redis.Nil {
+		// 缓存未命中 (Key或Field不存在)，这是正常情况，直接返回
+		return nil, redis.Nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute HGet from redis: %w", err)
+	}
+
+	// 将 JSON 反序列化回 Url 结构体
+	var cachedUrl db.Url
+	if err := json.Unmarshal(payloadBytes, &cachedUrl); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal cached url data: %w", err)
+	}
+
+	// **核心逻辑：检查是否过期**
+	// 1. ExpiredAt 字段不是零值 (意味着设置了过期时间)
+	// 2. 当前时间在 ExpiredAt 之后
+	if !cachedUrl.ExpiredAt.IsZero() && time.Now().After(cachedUrl.ExpiredAt) {
+		// 缓存已过期！
+		// 异步地从哈希中删除这个过期的字段，避免占用空间
+		go s.rdb.HDel(ctx, shortcode_prefix, shortCode)
+
+		// 像缓存未命中一样处理，通知调用者去数据库查找
+		return nil, redis.Nil
+	}
+
+	// 缓存命中且有效，返回完整的 Url 对象
+	return &cachedUrl, nil
 }
 
 // generateRandomString 生成指定长度的随机字符串

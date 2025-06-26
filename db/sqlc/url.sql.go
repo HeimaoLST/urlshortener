@@ -10,6 +10,22 @@ import (
 	"time"
 )
 
+const addUrlClick = `-- name: AddUrlClick :exec
+UPDATE urls
+SET clicks = clicks + $1 
+WHERE id = $2
+`
+
+type AddUrlClickParams struct {
+	AddCount int32 `json:"add_count"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) AddUrlClick(ctx context.Context, arg AddUrlClickParams) error {
+	_, err := q.db.ExecContext(ctx, addUrlClick, arg.AddCount, arg.ID)
+	return err
+}
+
 const createUrl = `-- name: CreateUrl :one
 INSERT INTO urls(
     original_url,
@@ -19,7 +35,7 @@ INSERT INTO urls(
 ) VALUES (
     $1,$2,$3,$4
 ) 
-RETURNING id, original_url, short_code, is_custom, expired_at, created_at
+RETURNING id, original_url, short_code, is_custom, expired_at, created_at, clicks
 `
 
 type CreateUrlParams struct {
@@ -44,12 +60,13 @@ func (q *Queries) CreateUrl(ctx context.Context, arg CreateUrlParams) (Url, erro
 		&i.IsCustom,
 		&i.ExpiredAt,
 		&i.CreatedAt,
+		&i.Clicks,
 	)
 	return i, err
 }
 
 const getUrlByShortCode = `-- name: GetUrlByShortCode :one
-SELECT id, original_url, short_code, is_custom, expired_at, created_at
+SELECT id, original_url, short_code, is_custom, expired_at, created_at, clicks
 FROM urls
 WHERE short_code = $1
 `
@@ -64,6 +81,7 @@ func (q *Queries) GetUrlByShortCode(ctx context.Context, shortCode string) (Url,
 		&i.IsCustom,
 		&i.ExpiredAt,
 		&i.CreatedAt,
+		&i.Clicks,
 	)
 	return i, err
 }

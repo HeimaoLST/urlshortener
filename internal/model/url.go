@@ -14,8 +14,9 @@ type CreateURLResponse struct {
 	ExpireAt  time.Time `json:"expire_at"`
 }
 type URL struct {
-	ShortCode   string    `json:"short_code"`
-	OriginalURL string    `json:"original_url"`
-	ExpiredAt   time.Time `json:"expired_at"`
-	IsCustom    bool      `json:"is_custom"`
+	ShortCode   string    `json:"short_code redis:"-"`
+	OriginalURL string    `json:"original_url" redis:"original_url"`
+	ExpiredAt   time.Time `json:"expired_at" redis:"expired_at"`
+	IsCustom    bool      `json:"is_custom" redis:"is_custom"`
+	Clicks      int       `json:"clicks" redis: "clicks"`
 }

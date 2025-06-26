@@ -15,4 +15,5 @@ type Url struct {
 	IsCustom    bool      `json:"is_custom"`
 	ExpiredAt   time.Time `json:"expired_at"`
 	CreatedAt   time.Time `json:"created_at"`
+	Clicks      int32     `json:"clicks"`
 }

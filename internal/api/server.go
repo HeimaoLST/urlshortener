@@ -14,6 +14,8 @@ type Server struct {
 	router *gin.Engine
 
 	rdb *redis.Client
+
+	clickChan chan int64
 }
 
 func NewServer(store *db.Store, rdb *redis.Client) *Server {
