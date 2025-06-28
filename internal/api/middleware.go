@@ -27,6 +27,7 @@ func (server *Server) AuthMiddleware() gin.HandlerFunc {
 		// 通常令牌格式是 "Bearer <token>"，我们需要解析出 <token> 部分
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
+			// log.Println("Auth -> ", authHeader)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, errResponse(errors.New("授权令牌格式不正确")))
 			return
 		}

@@ -12,7 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // LoginRequest 定义了登录请求的结构
@@ -60,7 +59,7 @@ func (server *Server) Login(ctx *gin.Context) {
 	// 1. 从数据库根据 username 查询用户
 	user, err := server.store.GetUserByUsername(ctx, req.Username)
 	if err != nil {
-		// ...处理用户不存在或数据库错误...
+
 		ctx.JSON(http.StatusUnauthorized, errResponse(errors.New("用户名或密码错误")))
 		return
 	}
@@ -91,7 +90,7 @@ func (server *Server) RegisterUser(ctx *gin.Context) {
 	}
 
 	// 2. 对明文密码进行哈希处理
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hashedPassword, err := util.Crypto(req.Password)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("处理密码时出错")))
 		return

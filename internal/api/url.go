@@ -179,7 +179,7 @@ func (server *Server) recordClick(urlID int64) {
 		log.Println("WARN: Click channel is full. Discarding click event.")
 	}
 }
-func (server *Server) clickProcessor() {
+func (server *Server) ClickProcessor() {
 	// 使用 map 在内存中聚合点击次数
 	// key: url_id, value: click_count
 	clicks := make(map[int64]int)

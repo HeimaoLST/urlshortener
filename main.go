@@ -1,20 +1,17 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	redisclient "github/heimaolst/urlshorter/db/redis"
 	db "github/heimaolst/urlshorter/db/sqlc"
 	"github/heimaolst/urlshorter/internal/api"
 	"github/heimaolst/urlshorter/internal/util"
 	"log"
-	
+
 	_ "github.com/lib/pq"
 
 	"github.com/redis/go-redis/v9"
 )
-
-var ctx = context.Background()
 
 func main() {
 	config, err := util.LoadConfig(".")
@@ -36,7 +33,9 @@ func main() {
 
 	rdb := redisclient.NewRedisClient(opt)
 
-	server := api.NewServer(store, rdb)
-
+	size := 10240
+	server := api.NewServer(store, rdb, size)
+	go server.ClickProcessor()
 	server.Start(config.ServerAddress)
+
 }

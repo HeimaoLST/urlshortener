@@ -18,9 +18,10 @@ type Server struct {
 	clickChan chan int64
 }
 
-func NewServer(store *db.Store, rdb *redis.Client) *Server {
+func NewServer(store *db.Store, rdb *redis.Client, size int) *Server {
 	server := &Server{store: store,
-		rdb: rdb}
+		rdb:       rdb,
+		clickChan: make(chan int64, size)}
 	router := gin.Default()
 	router.Use(cors.Default())
 

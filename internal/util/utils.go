@@ -31,7 +31,7 @@ func CheckPassword(password string, hashedpassword string) error {
 
 func Crypto(password string) (string, error) {
 	sercet := "thisN0Sercet"
-	salt := "HHH"
+	salt := "HHHK"
 	key := sercet + salt
 	origData := []byte(password)
 	k := []byte(key)
