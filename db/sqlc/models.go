@@ -5,15 +5,26 @@
 package db
 
 import (
+	"database/sql"
 	"time"
 )
 
 type Url struct {
-	ID          int64     `json:"id"`
-	OriginalUrl string    `json:"original_url"`
-	ShortCode   string    `json:"short_code"`
-	IsCustom    bool      `json:"is_custom"`
-	ExpiredAt   time.Time `json:"expired_at"`
-	CreatedAt   time.Time `json:"created_at"`
-	Clicks      int32     `json:"clicks"`
+	ID          int64         `json:"id"`
+	OriginalUrl string        `json:"original_url"`
+	ShortCode   string        `json:"short_code"`
+	IsCustom    bool          `json:"is_custom"`
+	ExpiredAt   time.Time     `json:"expired_at"`
+	CreatedAt   time.Time     `json:"created_at"`
+	Clicks      int32         `json:"clicks"`
+	UserID      sql.NullInt64 `json:"user_id"`
+}
+
+type User struct {
+	ID           int64     `json:"id"`
+	Username     string    `json:"username"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"password_hash"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }

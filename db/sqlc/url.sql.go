@@ -12,7 +12,7 @@ import (
 
 const addUrlClick = `-- name: AddUrlClick :exec
 UPDATE urls
-SET clicks = clicks + $1 
+SET clicks = clicks + $1
 WHERE id = $2
 `
 
@@ -35,7 +35,7 @@ INSERT INTO urls(
 ) VALUES (
     $1,$2,$3,$4
 ) 
-RETURNING id, original_url, short_code, is_custom, expired_at, created_at, clicks
+RETURNING id, original_url, short_code, is_custom, expired_at, created_at, clicks, user_id
 `
 
 type CreateUrlParams struct {
@@ -61,12 +61,13 @@ func (q *Queries) CreateUrl(ctx context.Context, arg CreateUrlParams) (Url, erro
 		&i.ExpiredAt,
 		&i.CreatedAt,
 		&i.Clicks,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const getUrlByShortCode = `-- name: GetUrlByShortCode :one
-SELECT id, original_url, short_code, is_custom, expired_at, created_at, clicks
+SELECT id, original_url, short_code, is_custom, expired_at, created_at, clicks, user_id
 FROM urls
 WHERE short_code = $1
 `
@@ -82,6 +83,7 @@ func (q *Queries) GetUrlByShortCode(ctx context.Context, shortCode string) (Url,
 		&i.ExpiredAt,
 		&i.CreatedAt,
 		&i.Clicks,
+		&i.UserID,
 	)
 	return i, err
 }

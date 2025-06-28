@@ -23,12 +23,19 @@ func NewServer(store *db.Store, rdb *redis.Client) *Server {
 		rdb: rdb}
 	router := gin.Default()
 	router.Use(cors.Default())
+
+	router.POST("/api/users/login", server.Login)
+	router.POST("/api/users/register", server.RegisterUser)
+	// router.GET("/:shortcode", server.RedirectURL)
 	api := router.Group("api")
 	{
-		api.POST("/create", server.CreateURL)
-
 		api.GET("/jump", server.RedirectURL)
 
+	}
+
+	authRoutes := router.Group("/api").Use(server.AuthMiddleware())
+	{
+		authRoutes.POST("/create", server.CreateURL)
 	}
 
 	server.router = router
