@@ -2,6 +2,7 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
 	db "github/heimaolst/urlshorter/db/sqlc"
 	"github/heimaolst/urlshorter/internal/auth"
@@ -19,11 +20,9 @@ type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
-
-type RegisterRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
-	Email    string `json:"email" binding:"required"`
+type LoginResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 // RegisterUserRequest 定义了用户注册时需要的请求体
@@ -49,6 +48,9 @@ func newUserResponse(user db.User) UserResponse {
 	}
 }
 
+
+
+// Login 处理用户登录，现在返回两种令牌
 func (server *Server) Login(ctx *gin.Context) {
 	var req LoginRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -56,30 +58,82 @@ func (server *Server) Login(ctx *gin.Context) {
 		return
 	}
 
-	// 1. 从数据库根据 username 查询用户
 	user, err := server.store.GetUserByUsername(ctx, req.Username)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			ctx.JSON(http.StatusUnauthorized, errResponse(errors.New("用户名或密码错误")))
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, errResponse(err))
+		return
+	}
 
+	err = util.CheckPassword(req.Password, user.PasswordHash)
+	if err != nil {
 		ctx.JSON(http.StatusUnauthorized, errResponse(errors.New("用户名或密码错误")))
 		return
 	}
 
-	// 2. 验证密码 (你需要一个密码验证的工具函数)
-	err = util.CheckPassword(req.Password, user.PasswordHash)
+	// 1. 生成 Access Token
+	accessToken, err := auth.GenerateAccessToken(user.ID, user.Username)
 	if err != nil {
-		ctx.JSON(http.StatusUnauthorized, errResponse(err))
+		ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("生成访问令牌失败")))
 		return
 	}
 
-	// 3. 密码验证成功，生成 JWT
-	token, err := auth.GenerateToken(user.ID, user.Username)
+	// 2. 生成 Refresh Token
+	refreshToken, err := auth.GenerateRefreshToken(user.ID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("生成令牌失败")))
+		ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("生成刷新令牌失败")))
 		return
 	}
 
-	// 4. 返回令牌
-	ctx.JSON(http.StatusOK, gin.H{"token": token})
+	// 3. 返回两种令牌
+	rsp := LoginResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}
+	ctx.JSON(http.StatusOK, rsp)
+}
+
+// --- 新增刷新令牌的 Handler ---
+
+// RefreshTokenRequest 定义了刷新令牌接口的请求体
+type RefreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+// RefreshToken 用于使用有效的 Refresh Token 获取新的 Access Token
+func (server *Server) RefreshToken(ctx *gin.Context) {
+	var req RefreshTokenRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, errResponse(err))
+		return
+	}
+
+	// 1. 验证 Refresh Token
+	claims, err := auth.ValidateRefreshToken(req.RefreshToken)
+	if err != nil {
+		ctx.JSON(http.StatusUnauthorized, errResponse(errors.New("无效的刷新令牌")))
+		return
+	}
+
+	// 2. 从数据库中获取最新的用户信息（确保用户没有被禁用或删除）
+	user, err := server.store.GetUserByID(ctx, claims.UserID)
+	if err != nil {
+		ctx.JSON(http.StatusUnauthorized, errResponse(errors.New("用户不存在")))
+		return
+	}
+
+	// 3. 生成一个新的 Access Token
+	newAccessToken, err := auth.GenerateAccessToken(user.ID, user.Username)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, errResponse(errors.New("生成访问令牌失败")))
+		return
+	}
+
+	// 4. 返回新的 Access Token
+	ctx.JSON(http.StatusOK, gin.H{"access_token": newAccessToken})
 }
 func (server *Server) RegisterUser(ctx *gin.Context) {
 	var req RegisterUserRequest

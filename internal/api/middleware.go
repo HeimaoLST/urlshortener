@@ -35,9 +35,9 @@ func (server *Server) AuthMiddleware() gin.HandlerFunc {
 		tokenString := parts[1]
 
 		// 解析并验证令牌
-		claims := &auth.Claims{}
+		claims := &auth.AccessTokenClaims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-			return auth.JWTSecret, nil // 返回签名密钥
+			return auth.AccessTokenSecret, nil // 返回签名密钥
 		})
 
 		if err != nil {
@@ -87,11 +87,16 @@ func (server *Server) AuthMiddleware() gin.HandlerFunc {
 		}
 
 		// 3. 将从数据库中查到的数据写回缓存
-		// 注意：写入缓存前，清空密码哈希，避免敏感信息进入缓存
+
 		user.PasswordHash = ""
 		userDataBytes, _ := json.Marshal(user)
 		// 设置一个合理的过期时间，例如 1 小时
-		server.rdb.Set(c, redisKey, userDataBytes, time.Hour*1)
+		go func() {
+			err := server.rdb.Set(c, redisKey, userDataBytes, time.Hour*1)
+			if err != nil {
+				log.Printf("WARN: Failed to set user cache for user %d: %v", userID, err)
+			}
+		}()
 
 		// 将用户信息存入 Context，继续请求
 		c.Set("user", user)

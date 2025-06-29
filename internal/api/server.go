@@ -27,6 +27,7 @@ func NewServer(store *db.Store, rdb *redis.Client, size int) *Server {
 
 	router.POST("/api/users/login", server.Login)
 	router.POST("/api/users/register", server.RegisterUser)
+	router.POST("/api/tokens/refresh", server.RefreshToken)
 	// router.GET("/:shortcode", server.RedirectURL)
 	api := router.Group("api")
 	{
